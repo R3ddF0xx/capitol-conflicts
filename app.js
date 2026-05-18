@@ -146,7 +146,7 @@ function renderConflictCard(c) {
     : '';
 
   return `
-    <a class="conflict-card ${cls}" href="politician.html?id=${c.member.id}">
+    <div class="conflict-card ${cls}" onclick="window.location.href='politician.html?id=${c.member.id}'" style="cursor:pointer">
       <div class="card-top">
         <div class="member-info">
           <div class="member-avatar">${avatarContent}</div>
@@ -189,7 +189,7 @@ function renderConflictCard(c) {
         ${committeeLine}
         ${pacLine}
       </div>
-    </a>
+    </div>
   `;
 }
 

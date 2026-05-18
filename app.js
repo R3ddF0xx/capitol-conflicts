@@ -5,9 +5,9 @@ const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 const DEMO_MODE = SUPABASE_URL === 'YOUR_SUPABASE_URL';
 
 // Supabase client (loaded via CDN in HTML)
-let supabase = null;
+let db = null;
 if (!DEMO_MODE) {
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
 // ── DEMO DATA ────────────────────────────────────────────────────────────────
@@ -213,7 +213,7 @@ async function loadConflicts(filters = {}) {
     if (filters.score === 'medium') conflicts = conflicts.filter(c => c.score >= 4 && c.score < 7);
     if (filters.score === 'low') conflicts = conflicts.filter(c => c.score < 4);
   } else {
-    const query = supabase
+    const query = db
       .from('conflicts_view')
       .select('*')
       .order('score', { ascending: false })

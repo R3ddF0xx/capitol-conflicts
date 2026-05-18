@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bill — Capitol Conflicts</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body data-page="bill">
+
+  <header>
+    <nav>
+      <a class="logo" href="index.html">
+        <span class="logo-icon">⚖</span>
+        <span class="logo-text">Capitol Conflicts</span>
+      </a>
+      <div class="nav-links">
+        <a href="index.html">Conflicts Feed</a>
+        <a href="politicians.html">Politicians</a>
+        <a href="bills.html">Bills</a>
+      </div>
+      <div class="nav-search">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="global-search" placeholder="Search politician or bill...">
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <p style="margin-bottom:16px"><a href="javascript:history.back()" style="color:var(--muted);text-decoration:none;font-size:14px">&#8592; Back</a></p>
+
+    <div class="bill-header">
+      <h1 id="bill-title">Loading...</h1>
+      <div class="bill-meta" id="bill-meta"></div>
+      <p class="bill-summary" id="bill-summary"></p>
+      <div class="bill-subjects" id="bill-subjects"></div>
+    </div>
+
+    <div class="vote-summary-bar" id="vote-summary-bar">
+      <div class="stat">
+        <span class="vote-count yes" id="vote-yes-count">—</span>
+        <span class="stat-label">Yea</span>
+      </div>
+      <div class="stat">
+        <span class="vote-count no" id="vote-no-count">—</span>
+        <span class="stat-label">Nay</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="vote-result">—</span>
+        <span class="stat-label">Result</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="conflict-count" style="color:var(--red)">—</span>
+        <span class="stat-label">Conflicts Flagged</span>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="showTab('all-votes')">All Votes</button>
+      <button class="tab-btn" onclick="showTab('conflicts-only')">Conflicts Only</button>
+    </div>
+
+    <!-- ALL VOTES TAB -->
+    <div id="tab-all-votes" class="tab-panel active">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Member</th>
+            <th>Party</th>
+            <th>State</th>
+            <th>Chamber</th>
+            <th>Vote</th>
+            <th>Stock Held</th>
+            <th>Conflict Score</th>
+          </tr>
+        </thead>
+        <tbody id="bill-votes-body">
+          <tr><td colspan="7" class="loading"><span class="spinner"></span>Loading votes...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- CONFLICTS ONLY TAB -->
+    <div id="tab-conflicts-only" class="tab-panel">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Member</th>
+            <th>Party</th>
+            <th>State</th>
+            <th>Vote</th>
+            <th>Stock Held</th>
+            <th>Trade Timing</th>
+            <th>Score</th>
+          </tr>
+        </thead>
+        <tbody id="bill-conflicts-body">
+          <tr><td colspan="7" class="empty-state">Select this tab to load conflicts.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <footer>
+    <p>Data sourced from Congress.gov, Capitol Trades, and SEC EDGAR filings.</p>
+    <p>Stock Act disclosures available from 2012 onward &nbsp;·&nbsp; Not affiliated with any government agency &nbsp;·&nbsp; For informational purposes only.</p>
+  </footer>
+
+  <script src="app.js"></script>
+  <script>
+    function showTab(name) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(`tab-${name}`).classList.add('active');
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>

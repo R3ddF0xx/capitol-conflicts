@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Politician — Capitol Conflicts</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body data-page="politician">
+
+  <header>
+    <nav>
+      <a class="logo" href="index.html">
+        <span class="logo-icon">⚖</span>
+        <span class="logo-text">Capitol Conflicts</span>
+      </a>
+      <div class="nav-links">
+        <a href="index.html">Conflicts Feed</a>
+        <a href="politicians.html">Politicians</a>
+        <a href="bills.html">Bills</a>
+      </div>
+      <div class="nav-search">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="global-search" placeholder="Search politician or bill...">
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <p style="margin-bottom:16px"><a href="javascript:history.back()" style="color:var(--muted);text-decoration:none;font-size:14px">&#8592; Back</a></p>
+
+    <div class="politician-header">
+      <div class="politician-photo" id="politician-photo"></div>
+      <div class="politician-details">
+        <h1 id="politician-name">Loading...</h1>
+        <div class="tags" id="politician-tags"></div>
+        <p class="bio" id="politician-bio"></p>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="showTab('conflicts')">Conflicts</button>
+      <button class="tab-btn" onclick="showTab('votes')">All Votes</button>
+      <button class="tab-btn" onclick="showTab('stocks')">Stock Disclosures</button>
+      <button class="tab-btn" onclick="showTab('committees')">Committees</button>
+      <button class="tab-btn" onclick="showTab('pac')">PAC Donations</button>
+    </div>
+
+    <!-- CONFLICTS TAB -->
+    <div id="tab-conflicts" class="tab-panel active">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Vote Date</th>
+            <th>Bill</th>
+            <th>Vote</th>
+            <th>Stock Held</th>
+            <th>Trade Timing</th>
+            <th>Conflict Score</th>
+          </tr>
+        </thead>
+        <tbody id="conflicts-table-body">
+          <tr><td colspan="6" class="loading"><span class="spinner"></span>Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ALL VOTES TAB -->
+    <div id="tab-votes" class="tab-panel">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Bill</th>
+            <th>Vote</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody id="votes-table-body">
+          <tr><td colspan="4" class="empty-state">Select this tab to load vote history.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- STOCK DISCLOSURES TAB -->
+    <div id="tab-stocks" class="tab-panel">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
+        STOCK Act disclosures available from 2012 onward. Earlier holdings not required to be reported.
+      </p>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Filed Date</th>
+            <th>Transaction Date</th>
+            <th>Ticker</th>
+            <th>Company</th>
+            <th>Type</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody id="stocks-table-body">
+          <tr><td colspan="6" class="empty-state">Select this tab to load disclosures.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- COMMITTEES TAB -->
+    <div id="tab-committees" class="tab-panel">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Committee</th>
+            <th>Role</th>
+            <th>Congress</th>
+          </tr>
+        </thead>
+        <tbody id="committees-table-body">
+          <tr><td colspan="3" class="empty-state">Select this tab to load committee assignments.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- PAC TAB -->
+    <div id="tab-pac" class="tab-panel">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>PAC Name</th>
+            <th>Industry</th>
+            <th>Amount</th>
+            <th>Cycle</th>
+          </tr>
+        </thead>
+        <tbody id="pac-table-body">
+          <tr><td colspan="4" class="empty-state">Select this tab to load PAC donations.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <footer>
+    <p>Data sourced from Congress.gov, Capitol Trades, and SEC EDGAR filings.</p>
+    <p>Stock Act disclosures available from 2012 onward &nbsp;·&nbsp; Not affiliated with any government agency &nbsp;·&nbsp; For informational purposes only.</p>
+  </footer>
+
+  <script src="app.js"></script>
+  <script>
+    function showTab(name) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(`tab-${name}`).classList.add('active');
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>

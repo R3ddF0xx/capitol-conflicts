@@ -158,6 +158,46 @@ JOIN member_votes     mv ON mv.member_id = c.member_id AND mv.vote_id = c.vote_i
 LEFT JOIN bills       b  ON b.id = v.bill_id
 LEFT JOIN stock_disclosures d ON d.id = c.disclosure_id;
 
+-- ── POLITICIANS SUMMARY VIEW ─────────────────────────────────────────────────
+-- One row per member showing total conflicts and severity.
+CREATE OR REPLACE VIEW politicians_summary AS
+SELECT
+  m.id,
+  m.full_name,
+  m.party,
+  m.state,
+  m.chamber,
+  m.photo_url,
+  COUNT(c.id)                                                 AS conflict_count,
+  COALESCE(MAX(c.score), 0)                                   AS max_score,
+  ROUND(AVG(c.score)::numeric, 1)                             AS avg_score,
+  COUNT(DISTINCT c.vote_id)                                   AS votes_with_conflicts,
+  ROUND(AVG(c.stock_return_30d)::numeric, 2)                  AS avg_return_30d
+FROM members m
+LEFT JOIN conflicts c ON c.member_id = m.id
+GROUP BY m.id, m.full_name, m.party, m.state, m.chamber, m.photo_url;
+
+-- ── BILLS SUMMARY VIEW ───────────────────────────────────────────────────────
+-- One row per bill showing total conflicts and severity.
+CREATE OR REPLACE VIEW bills_summary AS
+SELECT
+  b.id,
+  b.title,
+  b.link,
+  b.introduced_date,
+  b.subjects,
+  b.congress,
+  b.bill_type,
+  b.bill_number,
+  COUNT(c.id)                                                 AS conflict_count,
+  COALESCE(MAX(c.score), 0)                                   AS max_score,
+  COUNT(DISTINCT c.member_id)                                 AS members_flagged,
+  MAX(v.vote_date)                                            AS latest_vote_date
+FROM bills b
+LEFT JOIN votes v     ON v.bill_id = b.id
+LEFT JOIN conflicts c ON c.vote_id = v.id
+GROUP BY b.id, b.title, b.link, b.introduced_date, b.subjects, b.congress, b.bill_type, b.bill_number;
+
 -- ── INDEXES ───────────────────────────────────────────────────────────────────
 CREATE INDEX idx_member_votes_member   ON member_votes(member_id);
 CREATE INDEX idx_member_votes_vote     ON member_votes(vote_id);

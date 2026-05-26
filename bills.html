@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bills — Capitol Conflicts</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body data-page="bills">
+
+  <header>
+    <nav>
+      <a class="logo" href="index.html">
+        <span class="logo-icon">⚖</span>
+        <span class="logo-text">Capitol Conflicts</span>
+      </a>
+      <div class="nav-links">
+        <a href="index.html">Conflicts Feed</a>
+        <a href="politicians.html">Politicians</a>
+        <a href="bills.html" class="active">Bills</a>
+      </div>
+      <div class="nav-search">
+        <span class="search-icon">&#128269;</span>
+        <input type="text" id="global-search" placeholder="Search politician or bill...">
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <div class="page-header">
+      <h1>Bills</h1>
+      <p class="subtitle">Legislation with potential conflicts of interest, ranked by total members flagged</p>
+    </div>
+
+    <div class="filters">
+      <label>Congress</label>
+      <select id="filter-congress">
+        <option value="">All</option>
+        <option value="118">118 (2023–25)</option>
+        <option value="117">117 (2021–23)</option>
+        <option value="116">116 (2019–21)</option>
+        <option value="115">115 (2017–19)</option>
+        <option value="114">114 (2015–17)</option>
+        <option value="113">113 (2013–15)</option>
+      </select>
+
+      <label>Sort by</label>
+      <select id="filter-sort">
+        <option value="conflict_count">Most Conflicts</option>
+        <option value="members_flagged">Most Members Flagged</option>
+        <option value="max_score">Highest Score</option>
+        <option value="latest_vote_date">Most Recent</option>
+      </select>
+
+      <label>Search</label>
+      <input type="text" id="filter-search" placeholder="Bill title">
+
+      <button class="btn btn-primary" id="btn-apply-filters">Apply</button>
+      <button class="btn btn-ghost" id="btn-reset">Reset</button>
+    </div>
+
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Bill</th>
+          <th>Congress</th>
+          <th>Vote Date</th>
+          <th>Members Flagged</th>
+          <th>Conflicts</th>
+          <th>Max Score</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody id="bills-body">
+        <tr><td colspan="7" class="loading"><span class="spinner"></span>Loading bills...</td></tr>
+      </tbody>
+    </table>
+
+    <div class="pagination" id="pagination"></div>
+  </main>
+
+  <footer>
+    <p>Data sourced from Congress.gov, Capitol Trades, and SEC EDGAR filings.</p>
+    <p>Stock Act disclosures available from 2012 onward &nbsp;·&nbsp; Vote records from 2009 onward &nbsp;·&nbsp; Not affiliated with any government agency &nbsp;·&nbsp; For informational purposes only.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

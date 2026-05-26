@@ -646,6 +646,21 @@ async function loadBill() {
   const titleEl = document.getElementById('bill-title');
   if (titleEl) titleEl.textContent = bill.title;
 
+  // Bill metadata (congress + Congress.gov link)
+  const metaEl = document.getElementById('bill-meta');
+  if (metaEl) {
+    const parts = [];
+    if (bill.congress) parts.push(`Congress ${bill.congress}`);
+    if (bill.bill_type && bill.bill_number) parts.push(`${bill.bill_type.toUpperCase()} ${bill.bill_number}`);
+    if (bill.introduced_date) parts.push(`Introduced ${formatDate(bill.introduced_date)}`);
+    if (bill.link) parts.push(`<a href="${bill.link}" target="_blank" rel="noopener" style="color:var(--accent)">View on Congress.gov ↗</a>`);
+    metaEl.innerHTML = parts.join(' &nbsp;·&nbsp; ');
+  }
+
+  // Summary if available
+  const summaryEl = document.getElementById('bill-summary');
+  if (summaryEl && bill.summary) summaryEl.textContent = bill.summary;
+
   const subjectsEl = document.getElementById('bill-subjects');
   if (subjectsEl && bill.subjects?.length) {
     subjectsEl.innerHTML = bill.subjects.map(s => `<span class="subject-tag">${s}</span>`).join('');
@@ -730,6 +745,178 @@ async function loadBill() {
   }
 }
 
+// ── POLITICIANS BROWSE PAGE (politicians.html) ────────────────────────────────
+
+const POLITICIANS_PAGE_SIZE = 50;
+let politiciansCurrentPage = 0;
+
+async function loadPoliticians(filters = {}, page = 0) {
+  const tbody = document.getElementById('politicians-body');
+  const pagEl = document.getElementById('pagination');
+  if (!tbody) return;
+
+  politiciansCurrentPage = page;
+  tbody.innerHTML = '<tr><td colspan="7" class="loading"><span class="spinner"></span>Loading...</td></tr>';
+
+  const sort = filters.sort || 'conflict_count';
+  const ascending = sort === 'full_name';
+
+  let query = db.from('politicians_summary')
+    .select('*', { count: 'exact' })
+    .gt('conflict_count', 0)
+    .order(sort, { ascending });
+
+  if (filters.chamber) query = query.eq('chamber', filters.chamber);
+  if (filters.party) query = query.eq('party', filters.party);
+  if (filters.state) query = query.eq('state', filters.state);
+  if (filters.search) query = query.ilike('full_name', `%${filters.search}%`);
+
+  query = query.range(page * POLITICIANS_PAGE_SIZE, (page + 1) * POLITICIANS_PAGE_SIZE - 1);
+
+  const { data, error, count } = await query;
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Error: ${error.message}</td></tr>`;
+    return;
+  }
+
+  if (!data?.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No politicians match those filters.</td></tr>';
+    if (pagEl) pagEl.innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = data.map(p => `
+    <tr style="cursor:pointer" onclick="window.location.href='politician.html?id=${p.id}'">
+      <td>
+        <a href="politician.html?id=${p.id}" onclick="event.stopPropagation()">${p.full_name}</a>
+      </td>
+      <td>${partyTag(p.party)}</td>
+      <td>${p.state || '—'}</td>
+      <td>${chamberTag(p.chamber)}</td>
+      <td>${p.conflict_count.toLocaleString()}</td>
+      <td><span class="conflict-flag">⚠ ${p.max_score}/10</span></td>
+      <td>${p.avg_score || '—'}</td>
+    </tr>
+  `).join('');
+
+  renderPagination(pagEl, count, page, POLITICIANS_PAGE_SIZE,
+    p => loadPoliticians(filters, p));
+}
+
+function getPoliticianFilters() {
+  return {
+    chamber: document.getElementById('filter-chamber')?.value || '',
+    party: document.getElementById('filter-party')?.value || '',
+    state: document.getElementById('filter-state')?.value || '',
+    sort: document.getElementById('filter-sort')?.value || 'conflict_count',
+    search: document.getElementById('filter-search')?.value || '',
+  };
+}
+
+// ── BILLS BROWSE PAGE (bills.html) ────────────────────────────────────────────
+
+const BILLS_PAGE_SIZE = 50;
+let billsCurrentPage = 0;
+
+async function loadBillsBrowse(filters = {}, page = 0) {
+  const tbody = document.getElementById('bills-body');
+  const pagEl = document.getElementById('pagination');
+  if (!tbody) return;
+
+  billsCurrentPage = page;
+  tbody.innerHTML = '<tr><td colspan="7" class="loading"><span class="spinner"></span>Loading...</td></tr>';
+
+  const sort = filters.sort || 'conflict_count';
+
+  let query = db.from('bills_summary')
+    .select('*', { count: 'exact' })
+    .gt('conflict_count', 0)
+    .order(sort, { ascending: false, nullsFirst: false });
+
+  if (filters.congress) query = query.eq('congress', parseInt(filters.congress));
+  if (filters.search) query = query.ilike('title', `%${filters.search}%`);
+
+  query = query.range(page * BILLS_PAGE_SIZE, (page + 1) * BILLS_PAGE_SIZE - 1);
+
+  const { data, error, count } = await query;
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Error: ${error.message}</td></tr>`;
+    return;
+  }
+
+  if (!data?.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No bills match those filters.</td></tr>';
+    if (pagEl) pagEl.innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = data.map(b => {
+    const congressGovLink = b.link
+      ? `<a href="${b.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View on Congress.gov">Congress.gov ↗</a>`
+      : '—';
+    return `
+      <tr style="cursor:pointer" onclick="window.location.href='bill.html?id=${b.id}'">
+        <td>
+          <a href="bill.html?id=${b.id}" onclick="event.stopPropagation()">${b.title || 'Untitled'}</a>
+          ${b.subjects?.length ? `<br><small style="color:var(--muted)">${b.subjects.slice(0, 3).join(' · ')}</small>` : ''}
+        </td>
+        <td>${b.congress || '—'}</td>
+        <td>${formatDate(b.latest_vote_date)}</td>
+        <td>${b.members_flagged?.toLocaleString() || 0}</td>
+        <td>${b.conflict_count.toLocaleString()}</td>
+        <td><span class="conflict-flag">⚠ ${b.max_score}/10</span></td>
+        <td>${congressGovLink}</td>
+      </tr>
+    `;
+  }).join('');
+
+  renderPagination(pagEl, count, page, BILLS_PAGE_SIZE,
+    p => loadBillsBrowse(filters, p));
+}
+
+function getBillFilters() {
+  return {
+    congress: document.getElementById('filter-congress')?.value || '',
+    sort: document.getElementById('filter-sort')?.value || 'conflict_count',
+    search: document.getElementById('filter-search')?.value || '',
+  };
+}
+
+// ── PAGINATION RENDERER ──────────────────────────────────────────────────────
+
+function renderPagination(el, totalCount, currentPage, pageSize, onClick) {
+  if (!el) return;
+  const totalPages = Math.ceil((totalCount || 0) / pageSize);
+  if (totalPages <= 1) {
+    el.innerHTML = '';
+    return;
+  }
+
+  const max = 7;
+  let start = Math.max(0, currentPage - Math.floor(max / 2));
+  let end = Math.min(totalPages, start + max);
+  start = Math.max(0, end - max);
+
+  const buttons = [];
+  if (currentPage > 0) {
+    buttons.push(`<button class="page-btn" data-page="${currentPage - 1}">‹ Prev</button>`);
+  }
+  for (let p = start; p < end; p++) {
+    buttons.push(`<button class="page-btn ${p === currentPage ? 'active' : ''}" data-page="${p}">${p + 1}</button>`);
+  }
+  if (currentPage < totalPages - 1) {
+    buttons.push(`<button class="page-btn" data-page="${currentPage + 1}">Next ›</button>`);
+  }
+  el.innerHTML = buttons.join('');
+
+  el.querySelectorAll('.page-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      onClick(parseInt(b.dataset.page));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+}
+
 // ── SEARCH ────────────────────────────────────────────────────────────────────
 
 function setupSearch() {
@@ -757,4 +944,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (page === 'politician') loadPolitician();
   if (page === 'bill') loadBill();
+
+  if (page === 'politicians') {
+    loadPoliticians();
+    document.getElementById('btn-apply-filters')?.addEventListener('click', () => loadPoliticians(getPoliticianFilters()));
+    document.getElementById('btn-reset')?.addEventListener('click', () => {
+      document.querySelectorAll('.filters select, .filters input').forEach(el => el.value = '');
+      loadPoliticians();
+    });
+    document.getElementById('filter-search')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') loadPoliticians(getPoliticianFilters());
+    });
+  }
+
+  if (page === 'bills') {
+    loadBillsBrowse();
+    document.getElementById('btn-apply-filters')?.addEventListener('click', () => loadBillsBrowse(getBillFilters()));
+    document.getElementById('btn-reset')?.addEventListener('click', () => {
+      document.querySelectorAll('.filters select, .filters input').forEach(el => el.value = '');
+      loadBillsBrowse();
+    });
+    document.getElementById('filter-search')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') loadBillsBrowse(getBillFilters());
+    });
+  }
 });

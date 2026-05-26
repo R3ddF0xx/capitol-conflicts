@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Capitol Conflicts — US Politician Vote & Stock Tracker</title>
-  <meta name="description" content="Track potential conflicts of interest between US politicians' stock holdings and their votes in Congress.">
+  <title>Politicians — Capitol Conflicts</title>
   <link rel="stylesheet" href="styles.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
-<body data-page="feed">
+<body data-page="politicians">
 
   <header>
     <nav>
@@ -17,8 +16,8 @@
         <span class="logo-text">Capitol Conflicts</span>
       </a>
       <div class="nav-links">
-        <a href="index.html" class="active">Conflicts Feed</a>
-        <a href="politicians.html">Politicians</a>
+        <a href="index.html">Conflicts Feed</a>
+        <a href="politicians.html" class="active">Politicians</a>
         <a href="bills.html">Bills</a>
       </div>
       <div class="nav-search">
@@ -30,35 +29,8 @@
 
   <main>
     <div class="page-header">
-      <h1>Conflicts Feed</h1>
-      <p class="subtitle">Flagged votes where members held related stock positions — scored by potential conflict severity</p>
-    </div>
-
-    <div id="demo-banner" class="demo-banner" style="display:none">
-      Demo mode — showing sample data. Connect Supabase in app.js to load real congressional records.
-    </div>
-
-    <div class="stats-bar">
-      <div class="stat">
-        <span class="stat-value" id="stat-conflicts">—</span>
-        <span class="stat-label">Conflicts Flagged</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" id="stat-members">—</span>
-        <span class="stat-label">Members Involved</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" id="stat-bills">—</span>
-        <span class="stat-label">Bills Covered</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" id="stat-high">—</span>
-        <span class="stat-label">Score 5+</span>
-      </div>
-      <div class="stat" style="margin-left:auto; text-align:right">
-        <span class="stat-value" style="font-size:14px; color:var(--muted)">2009–Present</span>
-        <span class="stat-label">Vote coverage</span>
-      </div>
+      <h1>Politicians</h1>
+      <p class="subtitle">Members of Congress with potential conflicts of interest, ranked by severity</p>
     </div>
 
     <div class="filters">
@@ -95,25 +67,39 @@
         <option>WV</option><option>WY</option>
       </select>
 
-      <label>Score</label>
-      <select id="filter-score">
-        <option value="">All</option>
-        <option value="high">High (7–10)</option>
-        <option value="medium">Medium (4–6)</option>
-        <option value="low">Low (1–3)</option>
+      <label>Sort by</label>
+      <select id="filter-sort">
+        <option value="conflict_count">Most Conflicts</option>
+        <option value="max_score">Highest Score</option>
+        <option value="avg_score">Avg Score</option>
+        <option value="full_name">Name (A–Z)</option>
       </select>
 
-      <label>From</label>
-      <input type="date" id="filter-date-from" min="2009-01-01">
-
-      <label>To</label>
-      <input type="date" id="filter-date-to">
+      <label>Search</label>
+      <input type="text" id="filter-search" placeholder="Member name">
 
       <button class="btn btn-primary" id="btn-apply-filters">Apply</button>
-      <button class="btn btn-ghost" onclick="document.querySelectorAll('.filters select, .filters input').forEach(el=>el.value=''); loadConflicts();">Reset</button>
+      <button class="btn btn-ghost" id="btn-reset">Reset</button>
     </div>
 
-    <div id="conflicts-feed" class="conflicts-feed"></div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Member</th>
+          <th>Party</th>
+          <th>State</th>
+          <th>Chamber</th>
+          <th>Conflicts</th>
+          <th>Max Score</th>
+          <th>Avg Score</th>
+        </tr>
+      </thead>
+      <tbody id="politicians-body">
+        <tr><td colspan="7" class="loading"><span class="spinner"></span>Loading politicians...</td></tr>
+      </tbody>
+    </table>
+
+    <div class="pagination" id="pagination"></div>
   </main>
 
   <footer>

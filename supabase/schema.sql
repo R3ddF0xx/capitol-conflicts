@@ -122,6 +122,7 @@ SELECT
   c.score,
   c.days_between             AS days_diff,
   c.trade_timing,
+  c.sector_match,
   c.committee_match,
   c.pac_match,
   -- member

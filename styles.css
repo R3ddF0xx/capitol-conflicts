@@ -395,6 +395,130 @@ main {
 .card-footer .highlight { color: var(--red); font-weight: 500; }
 .card-footer .highlight-amber { color: var(--amber); font-weight: 500; }
 
+/* STOCK LIST (grouped cards) */
+.stock-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stock-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.stock-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.stock-ticker {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.stock-company {
+  font-size: 13px;
+  color: var(--muted);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stock-score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: rgba(255,255,255,0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.stock-item-detail {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.stock-item-detail .highlight { color: var(--red); font-weight: 500; }
+.stock-item-detail .highlight-amber { color: var(--amber); font-weight: 500; }
+
+/* SCORE BREAKDOWN (collapsible) */
+.card-breakdown {
+  border-top: 1px solid var(--border);
+  margin-top: 14px;
+}
+
+.breakdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.breakdown-header:hover { color: var(--accent); }
+
+.breakdown-toggle {
+  transition: transform 0.15s;
+}
+
+.card-breakdown.open .breakdown-toggle {
+  transform: rotate(90deg);
+}
+
+.breakdown-body {
+  display: none;
+  padding: 8px 0 4px;
+}
+
+.card-breakdown.open .breakdown-body {
+  display: block;
+}
+
+.breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.breakdown-label {
+  color: var(--muted);
+}
+
+.breakdown-pts {
+  font-weight: 600;
+  color: var(--amber);
+  min-width: 24px;
+  text-align: right;
+}
+
+.breakdown-total {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 6px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.breakdown-total .breakdown-pts {
+  color: var(--text);
+}
+
 /* POLITICIAN PAGE */
 .politician-header {
   display: flex;

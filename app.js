@@ -133,6 +133,9 @@ function normalizeViewRow(row) {
     score: row.score,
     days_diff: row.days_diff,
     trade_timing: row.trade_timing,
+    sector_match: row.sector_match || false,
+    committee_match: row.committee_match || false,
+    pac_match: row.pac_match || false,
     member: {
       id: row.member_id,
       name: row.member_name,
@@ -161,45 +164,127 @@ function normalizeViewRow(row) {
       amount_min: row.amount_min,
       amount_max: row.amount_max,
     },
-    committee: row.committee_match ? 'Sits on relevant committee' : null,
-    pac_match: row.pac_match ? 'PAC contribution from related industry' : null,
   };
 }
 
+// ── GROUP CONFLICTS ──────────────────────────────────────────────────────────
+// Merge rows that share the same member + vote into one card with multiple stocks.
+
+function groupConflicts(rows) {
+  const map = {};
+  for (const row of rows) {
+    const key = `${row.member.id}::${row.vote.id}`;
+    if (!map[key]) {
+      map[key] = {
+        member: row.member,
+        bill: row.bill,
+        vote: row.vote,
+        stocks: [],
+        maxScore: 0,
+      };
+    }
+    const group = map[key];
+    group.stocks.push({
+      ticker: row.stock.ticker,
+      company: row.stock.company,
+      transaction_type: row.stock.transaction_type,
+      transaction_date: row.stock.transaction_date,
+      amount_min: row.stock.amount_min,
+      amount_max: row.stock.amount_max,
+      score: row.score,
+      days_diff: row.days_diff,
+      sector_match: row.sector_match,
+      committee_match: row.committee_match,
+      pac_match: row.pac_match,
+      vote_position: row.vote.position,
+    });
+    if (row.score > group.maxScore) group.maxScore = row.score;
+  }
+  return Object.values(map);
+}
+
+// ── SCORE BREAKDOWN ─────────────────────────────────────────────────────────
+// Reconstruct how the 1–10 score was calculated from stored fields.
+
+function buildScoreBreakdown(stock) {
+  const items = [];
+  const abs = Math.abs(stock.days_diff);
+
+  // Timing
+  if (abs <= 30)       items.push({ label: `Traded ${abs} days from vote`, pts: 3 });
+  else if (abs <= 90)  items.push({ label: `Traded ${abs} days from vote`, pts: 2 });
+  else if (abs <= 180) items.push({ label: `Traded ${abs} days from vote`, pts: 1 });
+
+  if (stock.sector_match)    items.push({ label: 'Stock sector matches bill subject', pts: 2 });
+  if (stock.committee_match) items.push({ label: 'Sits on relevant committee', pts: 2 });
+  if (stock.pac_match)       items.push({ label: 'PAC donation from same industry', pts: 1 });
+
+  // Vote benefited position
+  const bought = stock.transaction_type === 'Purchase';
+  const sold = (stock.transaction_type || '').includes('Sale');
+  const votedYes = stock.vote_position === 'Yes';
+  const votedNo = stock.vote_position === 'No';
+  if ((bought && votedYes) || (sold && votedNo)) {
+    items.push({ label: 'Vote aligned with stock position', pts: 2 });
+  }
+
+  return items;
+}
+
 // ── CONFLICT CARD RENDERER ───────────────────────────────────────────────────
+// Accepts a grouped conflict: { member, bill, vote, stocks[], maxScore }
 
-function renderConflictCard(c) {
-  const cls = scoreClass(c.score);
-  const timing = timingText(c.days_diff);
-  const timingCls = Math.abs(c.days_diff) <= 30 ? 'highlight' : 'highlight-amber';
-  const avatarContent = c.member.photo
-    ? `<img src="${c.member.photo}" alt="${c.member.name}">`
-    : memberInitials(c.member.name);
+function renderConflictCard(g) {
+  const cls = scoreClass(g.maxScore);
+  const avatarContent = g.member.photo
+    ? `<img src="${g.member.photo}" alt="${g.member.name}">`
+    : memberInitials(g.member.name);
 
-  const pacLine = c.pac_match
-    ? `<span>PAC: ${c.pac_match}</span>`
-    : '';
+  // Sort stocks by score desc so the worst offender is first
+  const stocks = [...g.stocks].sort((a, b) => b.score - a.score);
 
-  const committeeLine = c.committee
-    ? `<span>Committee: ${c.committee}</span>`
-    : '';
+  // Build stock list items
+  const stockListHTML = stocks.map(s => {
+    const timing = timingText(s.days_diff);
+    const timingCls = Math.abs(s.days_diff) <= 30 ? 'highlight' : 'highlight-amber';
+    return `
+      <div class="stock-item">
+        <div class="stock-item-top">
+          <span class="stock-ticker">${s.ticker || '—'}</span>
+          <span class="stock-company">${s.company || ''}</span>
+          <span class="stock-score">${s.score}/10</span>
+        </div>
+        <div class="stock-item-detail">
+          ${s.transaction_type || ''} &nbsp;·&nbsp; ${s.amount_min ? formatMoney(s.amount_min, s.amount_max) : '—'} &nbsp;·&nbsp; ${formatDate(s.transaction_date)} &nbsp;·&nbsp; <span class="${timingCls}">${timing}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Score breakdown for the highest-scoring stock
+  const topStock = stocks[0];
+  const breakdown = buildScoreBreakdown(topStock);
+  const breakdownHTML = breakdown.map(b =>
+    `<div class="breakdown-row"><span class="breakdown-label">${b.label}</span><span class="breakdown-pts">+${b.pts}</span></div>`
+  ).join('');
+  const breakdownTotal = breakdown.reduce((sum, b) => sum + b.pts, 0);
 
   return `
-    <div class="conflict-card ${cls}" onclick="window.location.href='politician.html?id=${c.member.id}'" style="cursor:pointer">
+    <div class="conflict-card ${cls}" onclick="window.location.href='politician.html?id=${g.member.id}'" style="cursor:pointer">
       <div class="card-top">
         <div class="member-info">
           <div class="member-avatar">${avatarContent}</div>
           <div>
-            <div class="member-name">${c.member.name}</div>
+            <div class="member-name">${g.member.name}</div>
             <div class="member-meta">
-              ${partyTag(c.member.party)}
-              ${chamberTag(c.member.chamber)}
-              <span class="tag tag-senate">${c.member.state}</span>
+              ${partyTag(g.member.party)}
+              ${chamberTag(g.member.chamber)}
+              <span class="tag tag-senate">${g.member.state}</span>
             </div>
           </div>
         </div>
         <div class="score-badge">
-          <div class="score-circle">${c.score}</div>
+          <div class="score-circle">${g.maxScore}</div>
           <span class="score-label">Conflict Score</span>
         </div>
       </div>
@@ -208,25 +293,27 @@ function renderConflictCard(c) {
         <div>
           <div class="card-section-label">Bill Voted On</div>
           <div class="card-section-value">
-            <a href="bill.html?id=${c.bill.id}" onclick="event.stopPropagation()">
-              ${c.bill.title}
+            <a href="bill.html?id=${g.bill.id}" onclick="event.stopPropagation()">
+              ${g.bill.title}
             </a>
-            <br><small style="color:var(--muted)">${formatDate(c.vote.date)} &nbsp;·&nbsp; ${voteTag(c.vote.position)}</small>
+            <br><small style="color:var(--muted)">${formatDate(g.vote.date)} &nbsp;·&nbsp; ${voteTag(g.vote.position)}</small>
           </div>
         </div>
         <div>
-          <div class="card-section-label">Stock Position Held</div>
-          <div class="card-section-value">
-            <strong>${c.stock.ticker || '—'}</strong>${c.stock.company ? ' — ' + c.stock.company : ''}
-            <br><small style="color:var(--muted)">${c.stock.transaction_type || ''} &nbsp;·&nbsp; ${c.stock.amount_min ? formatMoney(c.stock.amount_min, c.stock.amount_max) : '—'} &nbsp;·&nbsp; ${formatDate(c.stock.transaction_date)}</small>
-          </div>
+          <div class="card-section-label">Stock Positions Held (${stocks.length})</div>
+          <div class="stock-list">${stockListHTML}</div>
         </div>
       </div>
 
-      <div class="card-footer">
-        <span class="${timingCls}">Traded ${timing}</span>
-        ${committeeLine}
-        ${pacLine}
+      <div class="card-breakdown">
+        <div class="breakdown-header" onclick="event.stopPropagation(); this.parentElement.classList.toggle('open')">
+          <span>Score Breakdown</span>
+          <span class="breakdown-toggle">▸</span>
+        </div>
+        <div class="breakdown-body">
+          ${breakdownHTML}
+          <div class="breakdown-row breakdown-total"><span>Total</span><span class="breakdown-pts">${breakdownTotal}${breakdownTotal > 10 ? ' → 10 max' : ''}</span></div>
+        </div>
       </div>
     </div>
   `;
@@ -255,7 +342,7 @@ async function loadConflicts(filters = {}) {
       .from('conflicts_view')
       .select('*')
       .order('score', { ascending: false })
-      .limit(50);
+      .limit(200);
 
     if (filters.chamber) query = query.eq('member_chamber', filters.chamber);
     if (filters.party) query = query.eq('member_party', filters.party);
@@ -279,7 +366,8 @@ async function loadConflicts(filters = {}) {
     return;
   }
 
-  feed.innerHTML = conflicts.map(renderConflictCard).join('');
+  const grouped = DEMO_MODE ? conflicts.map(c => ({ member: c.member, bill: c.bill, vote: c.vote, stocks: [{ ...c.stock, score: c.score, days_diff: c.days_diff, sector_match: false, committee_match: !!c.committee, pac_match: !!c.pac_match, vote_position: c.vote.position }], maxScore: c.score })) : groupConflicts(conflicts);
+  feed.innerHTML = grouped.map(renderConflictCard).join('');
 }
 
 function getFilters() {
@@ -314,9 +402,9 @@ async function loadStats() {
     { data: memberIds },
   ] = await Promise.all([
     db.from('conflicts').select('*', { count: 'exact', head: true }),
-    db.from('conflicts').select('*', { count: 'exact', head: true }).gte('score', 7),
+    db.from('conflicts').select('*', { count: 'exact', head: true }).gte('score', 5),
     db.from('votes').select('*', { count: 'exact', head: true }),
-    db.from('conflicts').select('member_id'),
+    db.from('stock_disclosures').select('member_id').limit(5000),
   ]);
 
   const membersCount = memberIds ? new Set(memberIds.map(r => r.member_id)).size : 0;

@@ -11,6 +11,24 @@ import requests
 from dotenv import load_dotenv
 from supabase import create_client
 
+STATE_ABBREVS = {
+    "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR",
+    "California": "CA", "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE",
+    "Florida": "FL", "Georgia": "GA", "Hawaii": "HI", "Idaho": "ID",
+    "Illinois": "IL", "Indiana": "IN", "Iowa": "IA", "Kansas": "KS",
+    "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD",
+    "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS",
+    "Missouri": "MO", "Montana": "MT", "Nebraska": "NE", "Nevada": "NV",
+    "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY",
+    "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH", "Oklahoma": "OK",
+    "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC",
+    "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT",
+    "Vermont": "VT", "Virginia": "VA", "Washington": "WA", "West Virginia": "WV",
+    "Wisconsin": "WI", "Wyoming": "WY", "District of Columbia": "DC",
+    "Puerto Rico": "PR", "Guam": "GU", "American Samoa": "AS",
+    "Virgin Islands": "VI", "Northern Mariana Islands": "MP",
+}
+
 load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -38,14 +56,32 @@ def fetch_members_page(offset=0, limit=250):
 def parse_member(m):
     terms = m.get("terms", {}).get("item", [])
     latest_term = terms[-1] if terms else {}
+
+    # Congress.gov returns name as "Last, First" — split it
+    name_raw = m.get("name", "")
+    if "," in name_raw:
+        parts = name_raw.split(",", 1)
+        last_name = parts[0].strip()
+        full_name = f"{parts[1].strip()} {parts[0].strip()}"  # "First Last"
+    else:
+        last_name = m.get("lastName", "")
+        full_name = name_raw
+
+    # Congress.gov returns full state name — normalize to two-letter code
+    raw_state = m.get("state", "")
+    state = STATE_ABBREVS.get(raw_state, raw_state)
+
+    raw_chamber = latest_term.get("chamber", "")
+    chamber = "Senate" if "Senate" in raw_chamber else "House" if "House" in raw_chamber else raw_chamber
+
     return {
         "id": m["bioguideId"],
         "first_name": m.get("firstName", ""),
-        "last_name": m.get("lastName", ""),
-        "full_name": m.get("name", ""),
+        "last_name": last_name,
+        "full_name": full_name,
         "party": m.get("partyName", "")[:1] if m.get("partyName") else None,
-        "state": m.get("state", ""),
-        "chamber": latest_term.get("chamber", ""),
+        "state": state,
+        "chamber": chamber,
         "district": str(latest_term.get("district", "")) if latest_term.get("district") else None,
         "photo_url": f"https://bioguide.congress.gov/bioguide/photo/{m['bioguideId'][0]}/{m['bioguideId']}.jpg",
         "active": m.get("currentMember", False)

@@ -1,13 +1,20 @@
 """
 fetch_disclosures.py
-Pulls politician stock disclosures from Capitol Trades API and upserts
-them into the Supabase `stock_disclosures` table.
+Pulls politician stock disclosures from two free sources:
 
-Capitol Trades aggregates STOCK Act filings for House and Senate members.
+  Senate: GitHub repo (timothycarambat/senate-stock-watcher-data)
+          Raw JSON — no API key required.
+
+  House:  Financial Modeling Prep (FMP) free API
+          Requires a free API key from financialmodelingprep.com
+          Free tier: 250 calls/day — run this script over multiple days
+          for full history, or just run it once for recent data.
+
 STOCK Act was enacted in 2012 — no data before that date.
 
 Run: python fetch_disclosures.py
-     python fetch_disclosures.py --year 2023
+     python fetch_disclosures.py --chamber senate
+     python fetch_disclosures.py --chamber house
 """
 
 import os
@@ -20,76 +27,213 @@ load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+FMP_KEY      = os.environ.get("FMP_API_KEY", "")
 
-CAPITOL_TRADES_BASE = "https://api.capitoltrades.com/v1"
+SENATE_JSON_URL = "https://raw.githubusercontent.com/timothycarambat/senate-stock-watcher-data/master/aggregate/all_transactions.json"
+FMP_HOUSE_URL   = "https://financialmodelingprep.com/api/v4/house-disclosure"
+FMP_SENATE_URL  = "https://financialmodelingprep.com/api/v4/senate-trading"
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-
-def fetch_trades_page(page=1, page_size=100, year=None):
-    url = f"{CAPITOL_TRADES_BASE}/trades"
-    params = {"page": page, "pageSize": page_size}
-    if year:
-        params["txDateMin"] = f"{year}-01-01"
-        params["txDateMax"] = f"{year}-12-31"
-    r = requests.get(url, params=params)
-    r.raise_for_status()
-    return r.json()
+db = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-def parse_trade(t):
-    politician = t.get("politician", {})
-    issuer = t.get("issuer", {})
+def normalize_type(raw):
+    if not raw:
+        return "Unknown"
+    raw = raw.strip().lower()
+    if "purchase" in raw or "buy" in raw:
+        return "Purchase"
+    if "sale (full)" in raw:
+        return "Sale (Full)"
+    if "sale (partial)" in raw:
+        return "Sale (Partial)"
+    if "sale" in raw or "sell" in raw:
+        return "Sale"
+    if "exchange" in raw:
+        return "Exchange"
+    return raw.title()
 
-    return {
-        "member_id": politician.get("id"),
-        "ticker": issuer.get("ticker"),
-        "company": issuer.get("name"),
-        "asset_description": issuer.get("name"),
-        "transaction_type": t.get("type"),
-        "transaction_date": t.get("txDate"),
-        "amount_min": t.get("amounts", {}).get("min"),
-        "amount_max": t.get("amounts", {}).get("max"),
-        "filed_date": t.get("filingDate"),
-        "source": "capitaltrades"
-    }
+
+def parse_amount(raw):
+    if not raw:
+        return None, None
+    raw = str(raw).replace(",", "").replace("$", "").replace("+", "").strip()
+    if " - " in raw:
+        parts = raw.split(" - ")
+        try:
+            return int(parts[0].strip()), int(parts[1].strip())
+        except ValueError:
+            return None, None
+    try:
+        val = int(raw.strip())
+        return val, val
+    except ValueError:
+        return None, None
 
 
-def run(year=None):
-    page = 1
-    total = 0
+def clean_date(d):
+    if not d:
+        return None
+    d = str(d).strip()
+    if len(d) > 10:
+        d = d[:10]
+    return d if len(d) == 10 else None
 
-    print(f"Fetching stock disclosures{' for ' + str(year) if year else ''}...")
+
+_members_cache = {}
+
+def load_members_cache():
+    """Load all members from Supabase into memory once."""
+    global _members_cache
+    if _members_cache:
+        return
+    print("  Loading members into memory...")
+    result = db.table("members").select("id, full_name, chamber").execute()
+    for m in result.data:
+        key = (m["full_name"].lower(), m["chamber"])
+        _members_cache[key] = m["id"]
+    print(f"  {len(_members_cache)} members loaded.")
+
+
+def match_member(name, chamber):
+    """Find a member's bioguide ID by last name match — uses local cache."""
+    if not name:
+        return None
+    load_members_cache()
+    name = name.strip().lower()
+    last = name.split()[-1]
+    for (full_name, ch), member_id in _members_cache.items():
+        if ch == chamber and last in full_name:
+            return member_id
+    return None
+
+
+def upsert_batch(rows):
+    if rows:
+        db.table("stock_disclosures").upsert(rows).execute()
+
+
+# ── SENATE via GitHub ─────────────────────────────────────────────────────────
+
+def fetch_senate_github():
+    local_file = os.path.join(os.path.dirname(__file__), "all_transactions.json")
+
+    print(f"Looking for local file at: {local_file} — exists: {os.path.exists(local_file)}")
+    if os.path.exists(local_file):
+        print(f"Reading Senate disclosures from local file: {local_file}")
+        with open(local_file, "r", encoding="utf-8") as f:
+            import json
+            trades = json.load(f)
+    else:
+        print("Fetching Senate disclosures from GitHub...")
+        r = requests.get(SENATE_JSON_URL, timeout=60)
+        r.raise_for_status()
+        trades = r.json()
+
+    print(f"  {len(trades)} Senate trades found")
+
+    rows, skipped, total = [], 0, 0
+
+    for t in trades:
+        member_id = match_member(t.get("senator"), "Senate")
+        if not member_id:
+            skipped += 1
+            continue
+
+        amount_min, amount_max = parse_amount(t.get("amount"))
+
+        rows.append({
+            "member_id": member_id,
+            "ticker": t.get("ticker", "").upper() if t.get("ticker") else None,
+            "company": t.get("asset_description", "") or t.get("asset_name", ""),
+            "asset_description": t.get("asset_description", ""),
+            "transaction_type": normalize_type(t.get("type")),
+            "transaction_date": clean_date(t.get("transaction_date")),
+            "amount_min": amount_min,
+            "amount_max": amount_max,
+            "filed_date": clean_date(t.get("disclosure_date") or t.get("date_received")),
+            "source": "senate-stock-watcher-github"
+        })
+
+        if len(rows) >= 500:
+            upsert_batch(rows)
+            total += len(rows)
+            print(f"  Upserted {total} so far (skipped {skipped} unmatched)...")
+            rows = []
+
+    upsert_batch(rows)
+    total += len(rows)
+    print(f"  Senate done. {total} upserted, {skipped} skipped.")
+
+
+# ── HOUSE via FMP ─────────────────────────────────────────────────────────────
+
+def fetch_house_fmp():
+    if not FMP_KEY:
+        print("  Skipping House — FMP_API_KEY not set in .env")
+        print("  Get a free key at https://financialmodelingprep.com/register")
+        print("  Then add FMP_API_KEY=your_key to scripts/.env and re-run with --chamber house")
+        return
+
+    print("Fetching House disclosures from FMP...")
+    page, total, skipped = 0, 0, 0
 
     while True:
-        data = fetch_trades_page(page=page, year=year)
-        trades = data.get("data", [])
+        params = {"apikey": FMP_KEY, "page": page}
+        r = requests.get(FMP_HOUSE_URL, params=params, timeout=30)
+        r.raise_for_status()
+        trades = r.json()
+
         if not trades:
             break
 
         rows = []
         for t in trades:
-            parsed = parse_trade(t)
-            if parsed["member_id"]:
-                rows.append(parsed)
+            member_id = match_member(t.get("representative"), "House")
+            if not member_id:
+                skipped += 1
+                continue
 
-        if rows:
-            supabase.table("stock_disclosures").upsert(rows).execute()
-            total += len(rows)
-            print(f"  Page {page}: upserted {len(rows)} trades (total: {total})")
+            amount_min, amount_max = parse_amount(t.get("amount"))
 
-        meta = data.get("meta", {})
-        total_pages = meta.get("totalPages", 1)
-        if page >= total_pages:
-            break
+            rows.append({
+                "member_id": member_id,
+                "ticker": t.get("ticker", "").upper() if t.get("ticker") else None,
+                "company": t.get("assetDescription", "") or t.get("asset_description", ""),
+                "asset_description": t.get("assetDescription", ""),
+                "transaction_type": normalize_type(t.get("type")),
+                "transaction_date": clean_date(t.get("transactionDate")),
+                "amount_min": amount_min,
+                "amount_max": amount_max,
+                "filed_date": clean_date(t.get("disclosureDate")),
+                "source": "fmp-house"
+            })
+
+        upsert_batch(rows)
+        total += len(rows)
+        print(f"  Page {page}: {len(rows)} trades (total: {total}, skipped: {skipped})")
         page += 1
 
-    print(f"\nDone. Total disclosures upserted: {total}")
-    print("Note: STOCK Act data only available from 2012 onward.")
+    print(f"  House done. {total} upserted, {skipped} skipped.")
+
+
+# ── MAIN ──────────────────────────────────────────────────────────────────────
+
+def run(chamber=None):
+    print("Note: STOCK Act data only available from 2012 onward.\n")
+
+    if chamber == "senate":
+        fetch_senate_github()
+    elif chamber == "house":
+        fetch_house_fmp()
+    else:
+        fetch_senate_github()
+        fetch_house_fmp()
+
+    print("\nDone.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--year", type=int, help="Limit to a specific year (e.g. 2023)")
+    parser.add_argument("--chamber", choices=["house", "senate"])
     args = parser.parse_args()
-    run(year=args.year)
+    run(chamber=args.chamber)

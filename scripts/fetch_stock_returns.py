@@ -96,9 +96,8 @@ def fetch_prices_for_ticker(ticker, from_date, to_date):
         r.raise_for_status()
         data = r.json()
         fmp_calls += 1
-        # 8 calls/min on free tier = stay under by sleeping ~8s
-        # Actually that's too slow; use ~0.5s and back off on 429
-        time.sleep(0.5)
+        # 8 calls/min on free tier — sleep 8s to stay just under the limit
+        time.sleep(8)
     except Exception as e:
         print(f"    Twelve Data error for {ticker}: {e}")
         return {}
@@ -165,117 +164,153 @@ def compute_return(price_before, price_after):
     return round(((price_after - price_before) / price_before) * 100, 2)
 
 
+def fetch_conflicts_for_ticker(ticker):
+    """Paginate through all conflicts for a given ticker that need a return."""
+    all_rows = []
+    page_size = 1000
+    offset = 0
+    while True:
+        res = db.table("conflicts_view") \
+            .select("id, vote_date, transaction_type") \
+            .is_("stock_return_30d", "null") \
+            .eq("ticker", ticker) \
+            .range(offset, offset + page_size - 1) \
+            .execute()
+        rows = res.data or []
+        all_rows.extend(rows)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+    return all_rows
+
+
+def get_unique_tickers_needing_returns():
+    """Get a list of unique tickers that still have unprocessed conflicts.
+    Uses pagination since Supabase caps at 1000 rows per request."""
+    seen = set()
+    page_size = 1000
+    offset = 0
+    while True:
+        res = db.table("conflicts_view") \
+            .select("ticker") \
+            .is_("stock_return_30d", "null") \
+            .not_.in_("ticker", ["--", "N/A", "NA", "", "NONE"]) \
+            .range(offset, offset + page_size - 1) \
+            .execute()
+        rows = res.data or []
+        for r in rows:
+            t = (r.get("ticker") or "").upper()
+            if t:
+                seen.add(t)
+        if len(rows) < page_size:
+            break
+        offset += page_size
+        if offset % 10000 == 0:
+            print(f"  ...scanned {offset} rows, {len(seen)} unique tickers so far")
+    return sorted(seen)
+
+
 def run(ticker_filter=None, limit=None):
-    # Step 1: Get conflicts that don't have a return yet, pre-joined with
-    # disclosures and votes so we can filter out junk tickers at the DB level.
-    # Uses conflicts_view which already joins everything we need.
-    query = db.table("conflicts_view") \
-        .select("id, member_id, vote_id, ticker, vote_date, transaction_type") \
-        .is_("stock_return_30d", "null") \
-        .not_.in_("ticker", ["--", "N/A", "NA", "", "NONE"]) \
-        .limit(limit or 5000)
-
+    # Step 1: Discover all unique tickers that need returns
     if ticker_filter:
-        query = query.eq("ticker", ticker_filter.upper())
+        tickers = [ticker_filter.upper()]
+    else:
+        print("Scanning for unique tickers needing returns...")
+        tickers = get_unique_tickers_needing_returns()
+        print(f"Found {len(tickers)} unique tickers to process")
 
-    result = query.execute()
-    conflicts = result.data
-    print(f"Found {len(conflicts)} conflicts with real tickers and no return yet")
-
-    if not conflicts:
-        print("All done — no conflicts left to process, or all remaining have junk tickers.")
+    if not tickers:
+        print("All done — no tickers left to process.")
         return
 
-    # Step 2: Figure out unique (ticker, vote_date) pairs we need prices for
-    ticker_dates = {}  # ticker -> set of vote_date strings
-    for c in conflicts:
-        ticker = c["ticker"].upper()
-        vote_date = c["vote_date"]
-        if not ticker or not vote_date:
+    total_updated = 0
+    total_skipped = 0
+
+    # Step 2: For each ticker, fetch its full price history and update conflicts
+    for i, ticker in enumerate(tickers, 1):
+        # Get all conflicts for this ticker
+        conflicts = fetch_conflicts_for_ticker(ticker)
+        if not conflicts:
             continue
-        if ticker not in ticker_dates:
-            ticker_dates[ticker] = set()
-        ticker_dates[ticker].add(vote_date)
 
-    print(f"Need prices for {len(ticker_dates)} unique tickers")
+        print(f"\n[{i}/{len(tickers)}] {ticker}: {len(conflicts)} conflicts to process")
 
-    # Step 3: Fetch prices — one API call per ticker covers all its dates
-    tickers_fetched = 0
-    for ticker, dates in ticker_dates.items():
-        # Check if we already have cached prices for all needed dates
-        all_cached = True
-        for vd in dates:
-            vote_d = date.fromisoformat(vd)
-            after_d = vote_d + timedelta(days=30)
-            if find_closest_price(ticker, vd) is None or find_closest_price(ticker, after_d.isoformat()) is None:
-                all_cached = False
+        # Determine the full date range we need
+        vote_dates = [date.fromisoformat(c["vote_date"]) for c in conflicts if c.get("vote_date")]
+        if not vote_dates:
+            continue
+        earliest = min(vote_dates) - timedelta(days=5)
+        latest = min(max(vote_dates) + timedelta(days=40), date.today())
+
+        # Check if we already have full cache coverage
+        needs_fetch = False
+        for vd in vote_dates:
+            if find_closest_price(ticker, vd.isoformat()) is None or \
+               find_closest_price(ticker, (vd + timedelta(days=30)).isoformat()) is None:
+                needs_fetch = True
                 break
 
-        if all_cached:
-            continue
+        if needs_fetch:
+            print(f"  Fetching prices ({earliest} to {latest})...")
+            fetch_prices_for_ticker(ticker, earliest.isoformat(), latest.isoformat())
 
-        # Need to fetch — find the widest date range needed
-        all_dates = [date.fromisoformat(d) for d in dates]
-        earliest = min(all_dates) - timedelta(days=5)  # buffer for weekends
-        latest = max(all_dates) + timedelta(days=40)    # 30 days + buffer
+            # If still no data after fetch attempt, mark conflicts with 0 to skip them next run
+            # (Use NULL → set to a sentinel? Better: leave NULL and they'll just stay skipped)
+            if ticker not in price_cache or not price_cache.get(ticker):
+                print(f"  No price data available for {ticker}, skipping all {len(conflicts)} conflicts")
+                total_skipped += len(conflicts)
+                continue
+        else:
+            print(f"  All prices cached — no API call needed")
 
-        # Don't fetch future dates
-        today = date.today()
-        if latest > today:
-            latest = today
+        # Compute returns for all conflicts of this ticker
+        updates = []
+        skipped_here = 0
+        for c in conflicts:
+            vote_date = c["vote_date"]
+            if not vote_date:
+                skipped_here += 1
+                continue
+            after_date = (date.fromisoformat(vote_date) + timedelta(days=30)).isoformat()
+            price_at_vote = find_closest_price(ticker, vote_date, direction=1)
+            price_30d = find_closest_price(ticker, after_date, direction=-1)
+            ret = compute_return(price_at_vote, price_30d)
+            if ret is None:
+                skipped_here += 1
+                continue
+            updates.append({"id": c["id"], "stock_return_30d": ret})
 
-        print(f"  Fetching {ticker} prices ({earliest} to {latest})...")
-        fetch_prices_for_ticker(ticker, earliest.isoformat(), latest.isoformat())
-        tickers_fetched += 1
-
-        # Save cache every 20 tickers
-        if tickers_fetched % 20 == 0:
-            save_cache(price_cache)
-            print(f"  Cache saved ({len(price_cache)} tickers)")
-
-    # Step 4: Compute returns and update conflicts
-    updates = []
-    skipped = 0
-    for c in conflicts:
-        ticker = c["ticker"].upper()
-        vote_date = c["vote_date"]
-        if not ticker or not vote_date:
-            skipped += 1
-            continue
-
-        after_date = (date.fromisoformat(vote_date) + timedelta(days=30)).isoformat()
-
-        price_at_vote = find_closest_price(ticker, vote_date, direction=1)
-        price_30d = find_closest_price(ticker, after_date, direction=-1)
-
-        ret = compute_return(price_at_vote, price_30d)
-        if ret is None:
-            skipped += 1
-            continue
-
-        updates.append({"id": c["id"], "stock_return_30d": ret})
-
-    print(f"Computed {len(updates)} returns, skipped {skipped} (no price data)")
-
-    # Batch update in chunks
-    updated = 0
-    for i in range(0, len(updates), 100):
-        batch = updates[i:i+100]
-        for row in batch:
+        # Push updates
+        updated_here = 0
+        for row in updates:
             try:
                 db.table("conflicts").update({"stock_return_30d": row["stock_return_30d"]}).eq("id", row["id"]).execute()
-                updated += 1
+                updated_here += 1
             except Exception as e:
-                print(f"  Update error for conflict {row['id']}: {e}")
+                print(f"  Update error for {row['id']}: {e}")
+
+        total_updated += updated_here
+        total_skipped += skipped_here
+        print(f"  Updated {updated_here}, skipped {skipped_here}")
+
+        # Save cache every 10 tickers
+        if i % 10 == 0:
+            save_cache(price_cache)
+
+        # Optional: respect a per-run limit on number of tickers processed
+        if limit and i >= limit:
+            print(f"\nHit ticker limit ({limit}). Stopping.")
+            break
 
     save_cache(price_cache)
-    print(f"\nDone. Updated {updated} conflicts. FMP API calls: {fmp_calls}")
-    print(f"Price cache: {len(price_cache)} tickers saved to {CACHE_FILE}")
+    print(f"\n=== Done. Updated {total_updated} conflicts, skipped {total_skipped} ===")
+    print(f"API calls this run: {fmp_calls}")
+    print(f"Price cache: {len(price_cache)} tickers in {CACHE_FILE}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ticker", type=str, help="Only process conflicts for this ticker")
-    parser.add_argument("--limit", type=int, help="Max conflicts to process (default 5000)")
+    parser.add_argument("--limit", type=int, help="Max tickers to process in this run")
     args = parser.parse_args()
     run(ticker_filter=args.ticker, limit=args.limit)

@@ -109,6 +109,7 @@ CREATE TABLE conflicts (
   sector_match              BOOLEAN DEFAULT false,
   committee_match           BOOLEAN DEFAULT false,
   pac_match                 BOOLEAN DEFAULT false,
+  stock_return_30d          NUMERIC,    -- % change in stock price from vote date to 30 days later
   notes                     TEXT,
   created_at                TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(member_id, vote_id, disclosure_id)
@@ -125,6 +126,7 @@ SELECT
   c.sector_match,
   c.committee_match,
   c.pac_match,
+  c.stock_return_30d,
   -- member
   m.id                       AS member_id,
   m.full_name                AS member_name,

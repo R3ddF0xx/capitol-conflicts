@@ -136,6 +136,7 @@ function normalizeViewRow(row) {
     sector_match: row.sector_match || false,
     committee_match: row.committee_match || false,
     pac_match: row.pac_match || false,
+    stock_return_30d: row.stock_return_30d,
     member: {
       id: row.member_id,
       name: row.member_name,
@@ -197,6 +198,7 @@ function groupConflicts(rows) {
       committee_match: row.committee_match,
       pac_match: row.pac_match,
       vote_position: row.vote.position,
+      stock_return_30d: row.stock_return_30d,
     });
     if (row.score > group.maxScore) group.maxScore = row.score;
   }
@@ -247,11 +249,27 @@ function renderConflictCard(g) {
   const stockListHTML = stocks.map(s => {
     const timing = timingText(s.days_diff);
     const timingCls = Math.abs(s.days_diff) <= 30 ? 'highlight' : 'highlight-amber';
+
+    // Stock return badge
+    let returnHTML = '';
+    if (s.stock_return_30d != null) {
+      const ret = s.stock_return_30d;
+      const arrow = ret >= 0 ? '▲' : '▼';
+      const cls = ret >= 0 ? 'return-up' : 'return-down';
+      // If they bought and stock went up, or sold and stock went down — they profited
+      const bought = s.transaction_type === 'Purchase';
+      const sold = (s.transaction_type || '').includes('Sale');
+      const profited = (bought && ret >= 0) || (sold && ret < 0);
+      const profitLabel = profited ? 'Gained' : 'Lost';
+      returnHTML = `<span class="stock-return ${cls}" title="Stock ${ret >= 0 ? 'up' : 'down'} ${Math.abs(ret)}% in 30 days after vote — member likely ${profitLabel.toLowerCase()}">${arrow} ${ret >= 0 ? '+' : ''}${ret}% · ${profitLabel}</span>`;
+    }
+
     return `
       <div class="stock-item">
         <div class="stock-item-top">
           <span class="stock-ticker">${s.ticker || '—'}</span>
           <span class="stock-company">${s.company || ''}</span>
+          ${returnHTML}
           <span class="stock-score">${s.score}/10</span>
         </div>
         <div class="stock-item-detail">

@@ -88,7 +88,7 @@ def load_members_cache():
     if _members_cache:
         return
     print("  Loading members into memory...")
-    result = db.table("members").select("id, full_name, chamber").execute()
+    result = db.table("members").select("id, full_name, chamber").limit(5000).execute()
     for m in result.data:
         key = (m["full_name"].lower(), m["chamber"])
         _members_cache[key] = m["id"]

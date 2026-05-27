@@ -30,6 +30,7 @@ SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 FMP_KEY      = os.environ.get("FMP_API_KEY", "")
 
 SENATE_JSON_URL = "https://raw.githubusercontent.com/timothycarambat/senate-stock-watcher-data/master/aggregate/all_transactions.json"
+HOUSE_JSON_URL  = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
 FMP_HOUSE_URL   = "https://financialmodelingprep.com/api/v4/house-disclosure"
 FMP_SENATE_URL  = "https://financialmodelingprep.com/api/v4/senate-trading"
 
@@ -165,7 +166,60 @@ def fetch_senate_github():
     print(f"  Senate done. {total} upserted, {skipped} skipped.")
 
 
-# ── HOUSE via FMP ─────────────────────────────────────────────────────────────
+# ── HOUSE via GitHub ──────────────────────────────────────────────────────────
+
+def fetch_house_github():
+    """Pull House disclosures from the house-stock-watcher GitHub repo.
+    Free, no API key. Falls back to FMP if this fails."""
+    print("Fetching House disclosures from GitHub (jeremiak/house-stock-watcher-data)...")
+
+    try:
+        r = requests.get(HOUSE_JSON_URL, timeout=120)
+        r.raise_for_status()
+        trades = r.json()
+    except Exception as e:
+        print(f"  GitHub fetch failed ({e}), falling back to FMP")
+        return fetch_house_fmp()
+
+    print(f"  {len(trades)} House trades found")
+
+    rows, skipped, total = [], 0, 0
+
+    for t in trades:
+        # House data uses "representative" field; sometimes "name" or "member"
+        rep_name = t.get("representative") or t.get("name") or t.get("member")
+        member_id = match_member(rep_name, "House")
+        if not member_id:
+            skipped += 1
+            continue
+
+        amount_min, amount_max = parse_amount(t.get("amount"))
+
+        rows.append({
+            "member_id": member_id,
+            "ticker": t.get("ticker", "").upper() if t.get("ticker") else None,
+            "company": t.get("asset_description") or t.get("assetDescription") or "",
+            "asset_description": t.get("asset_description") or t.get("assetDescription") or "",
+            "transaction_type": normalize_type(t.get("type") or t.get("transaction_type")),
+            "transaction_date": clean_date(t.get("transaction_date") or t.get("transactionDate")),
+            "amount_min": amount_min,
+            "amount_max": amount_max,
+            "filed_date": clean_date(t.get("disclosure_date") or t.get("disclosureDate")),
+            "source": "house-stock-watcher-github"
+        })
+
+        if len(rows) >= 500:
+            upsert_batch(rows)
+            total += len(rows)
+            print(f"  Upserted {total} so far (skipped {skipped} unmatched)...")
+            rows = []
+
+    upsert_batch(rows)
+    total += len(rows)
+    print(f"  House done. {total} upserted, {skipped} skipped.")
+
+
+# ── HOUSE via FMP (fallback only) ─────────────────────────────────────────────
 
 def fetch_house_fmp():
     if not FMP_KEY:
@@ -224,10 +278,10 @@ def run(chamber=None):
     if chamber == "senate":
         fetch_senate_github()
     elif chamber == "house":
-        fetch_house_fmp()
+        fetch_house_github()
     else:
         fetch_senate_github()
-        fetch_house_fmp()
+        fetch_house_github()
 
     print("\nDone.")
 

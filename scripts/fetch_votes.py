@@ -292,8 +292,14 @@ def fetch_house_year(congress, year):
                     "position": position
                 })
 
+        # De-dupe: House XML sometimes lists same member twice (vote corrections).
+        # Keep the last occurrence so the corrected vote wins.
         if member_rows:
-            db.table("member_votes").upsert(member_rows).execute()
+            seen = {}
+            for r in member_rows:
+                seen[(r["member_id"], r["vote_id"])] = r
+            unique_rows = list(seen.values())
+            db.table("member_votes").upsert(unique_rows, on_conflict="member_id,vote_id").execute()
 
         processed += 1
         vote_num += 1
